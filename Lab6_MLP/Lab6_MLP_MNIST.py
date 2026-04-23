@@ -91,8 +91,9 @@ def train_model(model, train_loader, test_loader, epochs, lr, name):
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    train_losses    = []
-    test_accuracies = []
+    train_losses     = []
+    train_accuracies = []
+    test_accuracies  = []
 
     print(f"\nTraining: {name}  |  Parameters: {count_parameters(model):,}")
 
@@ -112,7 +113,21 @@ def train_model(model, train_loader, test_loader, epochs, lr, name):
         avg_loss = total_loss / total_batches
         train_losses.append(avg_loss)
 
+        # Calculate training accuracy
         model.eval()
+        train_correct, train_total = 0, 0
+        with torch.no_grad():
+            for images, labels in train_loader:
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                _, predicted = torch.max(outputs, 1)
+                train_total += labels.size(0)
+                train_correct += (predicted == labels).sum().item()
+
+        train_accuracy = train_correct / train_total
+        train_accuracies.append(train_accuracy)
+
+        # Calculate test accuracy
         correct, total = 0, 0
         with torch.no_grad():
             for images, labels in test_loader:
@@ -122,39 +137,44 @@ def train_model(model, train_loader, test_loader, epochs, lr, name):
                 total   += labels.size(0)
                 correct += (predicted == labels).sum().item()
 
-        accuracy = correct / total
-        test_accuracies.append(accuracy)
-        print(f"  Epoch {epoch+1:2d}/{epochs} | Loss: {avg_loss:.4f} | Test Acc: {accuracy*100:.2f}%")
+        test_accuracy = correct / total
+        test_accuracies.append(test_accuracy)
 
-    return train_losses, test_accuracies
+        print(f"  Epoch {epoch+1:2d}/{epochs} | Loss: {avg_loss:.4f} | Train Acc: {train_accuracy*100:.2f}% | Test Acc: {test_accuracy*100:.2f}%")
+
+    return train_losses, train_accuracies, test_accuracies
 
 
 configs = {
-    'Config 1 (Under-param) 1L x 8' : {'hidden': [8],        'color': '#E74C3C'},
-    'Config 2 (Balanced) 2L x 128'  : {'hidden': [128, 128],  'color': '#27AE60'},
-    'Config 3 (Over-param) 5L x 512': {'hidden': [512]*5,     'color': '#2980B9'},
+    'Config 1 (Under-param) 1L x 8' : {'hidden': [8],         'color': '#E74C3C'},
+    'Config 2 (Balanced) 2L x 128'  : {'hidden': [128, 128], 'color': '#27AE60'},
+    'Config 3 (Over-param) 5L x 512': {'hidden': [512]*5,    'color': '#2980B9'},
 }
 
 all_results = {}
 for name, config in configs.items():
     model = MLP(config['hidden'])
-    losses, accs = train_model(model, train_loader, test_loader, EPOCHS, LEARNING_RATE, name)
+    losses, train_accs, test_accs = train_model(model, train_loader, test_loader, EPOCHS, LEARNING_RATE, name)
     all_results[name] = {
-        'model'     : model,
-        'losses'    : losses,
-        'accuracies': accs,
-        'color'     : config['color'],
-        'params'    : count_parameters(model),
-        'final_loss': losses[-1],
-        'final_acc' : accs[-1]
+        'model'          : model,
+        'losses'         : losses,
+        'train_accs'     : train_accs,
+        'test_accs'      : test_accs,
+        'accuracies'     : test_accs,
+        'color'          : config['color'],
+        'params'         : count_parameters(model),
+        'final_loss'     : losses[-1],
+        'final_train_acc': train_accs[-1],
+        'final_test_acc' : test_accs[-1],
+        'final_acc'      : test_accs[-1]
     }
 
-print("\n" + "=" * 65)
-print(f"{'Configuration':<35} {'Params':>10} {'Test Acc':>10}")
-print("-" * 65)
+print("\n" + "=" * 90)
+print(f"{'Configuration':<35} {'Params':>12} {'Train Acc':>15} {'Test Acc':>15}")
+print("-" * 90)
 for name, res in all_results.items():
-    print(f"{name:<35} {res['params']:>10,} {res['final_acc']*100:>9.2f}%")
-print("=" * 65)
+    print(f"{name:<35} {res['params']:>12,} {res['final_train_acc']*100:>14.2f}% {res['final_test_acc']*100:>14.2f}%")
+print("=" * 90)
 
 fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 fig.suptitle("Part B: Training Curves — All 3 Configurations\nELEC 442/6651 Lab 6",
@@ -162,7 +182,7 @@ fig.suptitle("Part B: Training Curves — All 3 Configurations\nELEC 442/6651 La
 for name, res in all_results.items():
     axes[0].plot(range(1, EPOCHS+1), res['losses'],
                  marker='o', color=res['color'], label=name, linewidth=2)
-    axes[1].plot(range(1, EPOCHS+1), [a*100 for a in res['accuracies']],
+    axes[1].plot(range(1, EPOCHS+1), [a*100 for a in res['test_accs']],
                  marker='s', color=res['color'], label=name, linewidth=2)
 
 axes[0].set_xlabel('Epoch')
@@ -187,10 +207,10 @@ print("Saved: Lab6_PartB_Training_Curves.png")
 # PART C: DETAILED EVALUATION OF BEST MODEL
 # ================================================================
 
-best_name  = max(all_results, key=lambda k: all_results[k]['final_acc'])
+best_name  = max(all_results, key=lambda k: all_results[k]['final_test_acc'])
 best_model = all_results[best_name]['model']
 print(f"\nBest model: {best_name}")
-print(f"Test Accuracy: {all_results[best_name]['final_acc']*100:.2f}%")
+print(f"Test Accuracy: {all_results[best_name]['final_test_acc']*100:.2f}%")
 
 best_model.eval()
 all_preds, all_labels = [], []
@@ -207,7 +227,7 @@ all_labels = np.array(all_labels)
 
 fig, ax = plt.subplots(figsize=(9, 5))
 best_losses = all_results[best_name]['losses']
-best_accs   = all_results[best_name]['accuracies']
+best_accs   = all_results[best_name]['test_accs']
 ax.plot(range(1, EPOCHS+1), best_losses, color='#27AE60',
         marker='o', linewidth=2.5, markersize=7, label='Training Loss')
 ax.fill_between(range(1, EPOCHS+1), best_losses, alpha=0.15, color='#27AE60')
